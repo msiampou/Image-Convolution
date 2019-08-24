@@ -19,8 +19,8 @@ run: mpiexec -f <machines> -n <processes> ./a.out width height type loops
 #include <limits.h>
 #include <stdint.h>
 
-#define filename1 "waterfall_grey_1920_2520.raw"
-#define filename2 "waterfall_1920_2520.raw"
+#define filename1 "../img/waterfall_grey_1920_2520.raw"
+#define filename2 "../img/waterfall_1920_2520.raw"
 
 typedef struct subarray{
     int cols;
@@ -55,7 +55,8 @@ int check_similarity(uint8_t *t0, uint8_t **t1, int pos){
 }
 
 static inline __attribute__((always_inline))
-int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow, int lcol, int cols, int bytes, float h[3][3], int flag){
+int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow, 
+                int lcol, int cols, int bytes, float h[3][3], int flag){
 
     int check = 0;
 
@@ -66,7 +67,6 @@ int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow, int lcol,
             float val = 0, bval = 0, gval = 0;
             int x=0;
             for (int k = i-1; k <= i+1; k++){
-
                 int y=0;
 		        for (int l = bytes*j - bytes; l <= bytes*j + bytes ; l += bytes){
 		            val += t0[bytes*(cols+2) * k + l] * h[x][y];
@@ -74,26 +74,22 @@ int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow, int lcol,
 		    	        gval += t0[bytes*(cols+2) * k + l+1] * h[x][y];
 			            bval += t0[bytes*(cols+2) * k + l+2] * h[x][y];
 		            }
-
 		            y++;
 		        }
-
                 x++;
 	        }
-
             (*t1)[bytes*(cols+2) * i + bytes*j] = val;
 
             /* We check for similarity under 2 circumstances:
                1. When inner data convolution takes place
                2. No differences between bytes have been found so far
             */
-            if ((flag) && (!check) && (CHECK_SIMILARITY))
+            if ((flag) && (!check) && (CHECK_SIMILARITY)) {
                 check = check_similarity(t0,t1,(bytes*(cols+2) * i + bytes*j));
-
+            }
             if(bytes==3){
 		        (*t1)[bytes*(cols+2) * i + bytes*j+1] = gval;
 		        (*t1)[bytes*(cols+2) * i + bytes*j+2] = bval;
-
                 if ((flag) && (!check) && (CHECK_SIMILARITY)){
                     check = check_similarity(t0,t1,(bytes*(cols+2) * i + bytes*j+1));
                     check = check_similarity(t0,t1,(bytes*(cols+2) * i + bytes*j+2));
@@ -105,7 +101,8 @@ int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow, int lcol,
 }
 
 static inline __attribute__((always_inline))
-int convolution(MPI_Datatype row_datatype, MPI_Datatype col_datatype, int rows, int cols, int bytes, dest_processes** p, uint8_t *t0,uint8_t **t1){
+int convolution(MPI_Datatype row_datatype, MPI_Datatype col_datatype, int rows, int cols, 
+                                    int bytes, dest_processes** p, uint8_t *t0,uint8_t **t1){
 
     int flag;
 
