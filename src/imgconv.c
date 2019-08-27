@@ -26,36 +26,44 @@ typedef struct subarray{
     int cols;
     int rows;
     int _div;
-}coords;
+} coords;
 
 typedef struct destination{
     int west;
     int east;
     int north;
     int south;
-}dest_processes;
+} dest_processes;
 
-MPI_Status status;
+typedef struct covonlution_data {
+    MPI_Datatype row_datatype;
+    MPI_Datatype col_datatype;
+    int rows;
+    int cols;
+    int bytes;
+    dest_processes p;
+    uint8_t *t0;
+    uint8_t *t1;
+} convolution_data_t;
+
+MPI_Status __status;
 
 #define CHECK_SIMILARITY 0
 
-/* exit failure */
 void perror_exit(const char *message){
     perror(message);
     MPI_Abort(MPI_COMM_WORLD, EXIT_FAILURE);
     exit(EXIT_FAILURE);
 }
 
-static inline __attribute__((always_inline))
-int check_similarity(uint8_t *t0, uint8_t **t1, int pos){
-    if(t0[pos]!=(*t1)[pos])
+int check_similarity(uint8_t *t0, uint8_t *t1, int pos){
+    if(t0[pos]!=t1[pos])
         return 1;
     else
         return 0;
 }
 
-static inline __attribute__((always_inline))
-int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow, 
+int convolute(uint8_t *t0, uint8_t *t1, int srow, int scol, int lrow, 
                 int lcol, int cols, int bytes, float h[3][3], int flag){
 
     int check = 0;
@@ -78,7 +86,7 @@ int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow,
 		        }
                 x++;
 	        }
-            (*t1)[bytes*(cols+2) * i + bytes*j] = val;
+            t1[bytes*(cols+2) * i + bytes*j] = val;
 
             /* We check for similarity under 2 circumstances:
                1. When inner data convolution takes place
@@ -88,8 +96,8 @@ int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow,
                 check = check_similarity(t0,t1,(bytes*(cols+2) * i + bytes*j));
             }
             if(bytes==3){
-		        (*t1)[bytes*(cols+2) * i + bytes*j+1] = gval;
-		        (*t1)[bytes*(cols+2) * i + bytes*j+2] = bval;
+		        t1[bytes*(cols+2) * i + bytes*j+1] = gval;
+		        t1[bytes*(cols+2) * i + bytes*j+2] = bval;
                 if ((flag) && (!check) && (CHECK_SIMILARITY)){
                     check = check_similarity(t0,t1,(bytes*(cols+2) * i + bytes*j+1));
                     check = check_similarity(t0,t1,(bytes*(cols+2) * i + bytes*j+2));
@@ -100,9 +108,15 @@ int convolute(uint8_t *t0, uint8_t **t1, int srow, int scol, int lrow,
     return check;
 }
 
-static inline __attribute__((always_inline))
-int convolution(MPI_Datatype row_datatype, MPI_Datatype col_datatype, int rows, int cols, 
-                                    int bytes, dest_processes** p, uint8_t *t0,uint8_t **t1){
+int convolution(convolution_data_t cd){
+    MPI_Datatype row_datatype = cd.row_datatype;
+    MPI_Datatype col_datatype = cd.col_datatype;
+    int rows = cd.rows;
+    int cols = cd.cols;
+    int bytes = cd.bytes;
+    dest_processes p = cd.p;
+    uint8_t *t0 = cd.t0;
+    uint8_t *t1 = cd.t1;
 
     int flag;
 
@@ -111,17 +125,17 @@ int convolution(MPI_Datatype row_datatype, MPI_Datatype col_datatype, int rows, 
 
     MPI_Request send_req[4], recv_req[4];
 
-    MPI_Isend(&t0[bytes*((cols+2) +1)], 1, row_datatype, (*p)->north, 0, MPI_COMM_WORLD, &send_req[0]);
-    MPI_Irecv(&t0[bytes], 1, row_datatype, (*p)->north, 0, MPI_COMM_WORLD, &recv_req[0]);
+    MPI_Isend(&t0[bytes*((cols+2) +1)], 1, row_datatype, p.north, 0, MPI_COMM_WORLD, &send_req[0]);
+    MPI_Irecv(&t0[bytes], 1, row_datatype, p.north, 0, MPI_COMM_WORLD, &recv_req[0]);
 
-    MPI_Isend(&t0[bytes*((cols+2) +1)], 1, col_datatype, (*p)->west, 0, MPI_COMM_WORLD, &send_req[1]);
-    MPI_Irecv(&t0[bytes*(cols+2)], 1, col_datatype, (*p)->west, 0, MPI_COMM_WORLD, &recv_req[1]);
+    MPI_Isend(&t0[bytes*((cols+2) +1)], 1, col_datatype, p.west, 0, MPI_COMM_WORLD, &send_req[1]);
+    MPI_Irecv(&t0[bytes*(cols+2)], 1, col_datatype, p.west, 0, MPI_COMM_WORLD, &recv_req[1]);
 
-    MPI_Isend(&t0[bytes*((rows*(cols+2)) +1)], 1, row_datatype, (*p)->south, 0, MPI_COMM_WORLD, &send_req[2]);
-    MPI_Irecv(&t0[bytes*(((rows+1)*(cols+2)) +1)], 1, row_datatype, (*p)->south, 0, MPI_COMM_WORLD, &recv_req[2]);
+    MPI_Isend(&t0[bytes*((rows*(cols+2)) +1)], 1, row_datatype, p.south, 0, MPI_COMM_WORLD, &send_req[2]);
+    MPI_Irecv(&t0[bytes*(((rows+1)*(cols+2)) +1)], 1, row_datatype, p.south, 0, MPI_COMM_WORLD, &recv_req[2]);
 
-    MPI_Isend(&t0[bytes*((cols+2) +cols)], 1, col_datatype, (*p)->east, 0, MPI_COMM_WORLD, &send_req[3]);
-    MPI_Irecv(&t0[bytes*((cols+2) +(cols+1))], 1, col_datatype, (*p)->east, 0, MPI_COMM_WORLD, &recv_req[3]);
+    MPI_Isend(&t0[bytes*((cols+2) +cols)], 1, col_datatype, p.east, 0, MPI_COMM_WORLD, &send_req[3]);
+    MPI_Irecv(&t0[bytes*((cols+2) +(cols+1))], 1, col_datatype, p.east, 0, MPI_COMM_WORLD, &recv_req[3]);
 
 
     /* compute inner data */
@@ -130,58 +144,58 @@ int convolution(MPI_Datatype row_datatype, MPI_Datatype col_datatype, int rows, 
     flag = 0;
 
     /* compute outer data */
-    if ((*p)->north != MPI_PROC_NULL){
-        MPI_Wait(&recv_req[0], &status);
+    if (p.north != MPI_PROC_NULL){
+        MPI_Wait(&recv_req[0], &__status);
         convolute(t0,t1,1,2,1,cols-1,cols,bytes,h,flag);
     }
 
-    if ((*p)->west != MPI_PROC_NULL){
-        MPI_Wait(&recv_req[1], &status);
+    if (p.west != MPI_PROC_NULL){
+        MPI_Wait(&recv_req[1], &__status);
         convolute(t0,t1,2,1,rows-1,1,cols,bytes,h,flag);
     }
 
-    if ((*p)->south != MPI_PROC_NULL){
-        MPI_Wait(&recv_req[2], &status);
+    if (p.south != MPI_PROC_NULL){
+        MPI_Wait(&recv_req[2], &__status);
         convolute(t0,t1,rows,2,rows,cols-1,cols,bytes,h,flag);
     }
 
-    if ((*p)->east != MPI_PROC_NULL){
-        MPI_Wait(&recv_req[3], &status);
+    if (p.east != MPI_PROC_NULL){
+        MPI_Wait(&recv_req[3], &__status);
         convolute(t0,t1,2,cols,rows-1,cols,cols,bytes,h,flag);
     }
 
-    if (((*p)->north != MPI_PROC_NULL) && ((*p)->west != MPI_PROC_NULL))
+    /* Deal with neighbors */
+    if ((p.north != MPI_PROC_NULL) && (p.west != MPI_PROC_NULL))
         convolute(t0,t1,1,1,1,1,cols,bytes,h,flag);
-    if (((*p)->south != MPI_PROC_NULL) && ((*p)->west != MPI_PROC_NULL))
+    if ((p.south != MPI_PROC_NULL) && (p.west != MPI_PROC_NULL))
         convolute(t0,t1,rows,1,rows,1,cols,bytes,h,flag);
-    if (((*p)->north != MPI_PROC_NULL) && ((*p)->east != MPI_PROC_NULL))
+    if ((p.north != MPI_PROC_NULL) && (p.east != MPI_PROC_NULL))
         convolute(t0,t1,cols,cols,cols,rows,cols,bytes,h,flag);
-    if (((*p)->south != MPI_PROC_NULL) && ((*p)->east != MPI_PROC_NULL))
+    if ((p.south != MPI_PROC_NULL) && (p.east != MPI_PROC_NULL))
         convolute(t0,t1,rows,cols,rows,cols,cols,bytes,h,flag);
 
     /* wait for all processes to finish */
-    if ((*p)->north != MPI_PROC_NULL)  MPI_Wait(&send_req[0], &status);
-    if ((*p)->west != MPI_PROC_NULL)   MPI_Wait(&send_req[1], &status);
-    if ((*p)->south != MPI_PROC_NULL)  MPI_Wait(&send_req[2], &status);
-    if ((*p)->east != MPI_PROC_NULL)   MPI_Wait(&send_req[3], &status);
+    if (p.north != MPI_PROC_NULL)  MPI_Wait(&send_req[0], &__status);
+    if (p.west != MPI_PROC_NULL)   MPI_Wait(&send_req[1], &__status);
+    if (p.south != MPI_PROC_NULL)  MPI_Wait(&send_req[2], &__status);
+    if (p.east != MPI_PROC_NULL)   MPI_Wait(&send_req[3], &__status);
 
     return check;
 }
 
-void compute_neighbors(int my_rank, int num_processes, int _div, dest_processes** p){
+void compute_neighbors(int my_rank, int num_processes, int _div, dest_processes* p){
 
-    (*p)->north = my_rank - _div;
-    (*p)->south = my_rank + _div;
-    (*p)->west = my_rank - 1;
-    (*p)->east = my_rank + 1;
+    p->north = my_rank - _div;
+    p->south = my_rank + _div;
+    p->west = my_rank - 1;
+    p->east = my_rank + 1;
 
-    if ((*p)->north < 0)               (*p)->north = MPI_PROC_NULL;
-    if ((*p)->south >= num_processes)  (*p)->south = MPI_PROC_NULL;
-    if ((*p)->west < 0)                (*p)->west = MPI_PROC_NULL;
-    if ((*p)->east >= num_processes)   (*p)->east = MPI_PROC_NULL;
+    if (p->north < 0)               p->north = MPI_PROC_NULL;
+    if (p->south >= num_processes)  p->south = MPI_PROC_NULL;
+    if (p->west < 0)                p->west = MPI_PROC_NULL;
+    if (p->east >= num_processes)   p->east = MPI_PROC_NULL;
 }
 
-/* Parallel Read */
 uint8_t* parallel_read(int my_rank, int _div, int rows_per_proc, int cols_per_proc, int bytes, int width){
 
     /* calculating starting column and row for each process */
@@ -201,14 +215,13 @@ uint8_t* parallel_read(int my_rank, int _div, int rows_per_proc, int cols_per_pr
 
     for(int i=1; i<=rows_per_proc; i++){
         MPI_File_seek(fh, (bytes*(start_row + i-1) * width + bytes*start_col), MPI_SEEK_SET);
-        MPI_File_read(fh, &t0[((bytes*(cols_per_proc+2))*i + bytes)], bytes*cols_per_proc, MPI_BYTE, &status);
+        MPI_File_read(fh, &t0[((bytes*(cols_per_proc+2))*i + bytes)], bytes*cols_per_proc, MPI_BYTE, &__status);
     }
 
     MPI_File_close(&fh);
     return t0;
 }
 
-/* Parallel Write */
 void parallel_write(int my_rank, int _div, int rows_per_proc, int cols_per_proc, int bytes, int width, uint8_t* t1){
 
     /* calculating starting column and row for each process */
@@ -221,7 +234,7 @@ void parallel_write(int my_rank, int _div, int rows_per_proc, int cols_per_proc,
 
     for(int i=1; i<=rows_per_proc; i++){
         MPI_File_seek(fh, (bytes*(start_row + i-1) * width + bytes*start_col), MPI_SEEK_SET);
-        MPI_File_write(fh, &t1[((bytes*(cols_per_proc+2)*i) + bytes)], bytes*cols_per_proc, MPI_BYTE, &status);
+        MPI_File_write(fh, &t1[((bytes*(cols_per_proc+2)*i) + bytes)], bytes*cols_per_proc, MPI_BYTE, &__status);
     }
 
     MPI_File_close(&fh);
@@ -240,7 +253,6 @@ int main(int argc, char **argv){
     int my_rank, comm_sz;
     int rows_per_proc, cols_per_proc, _div, bytes, loops, width, height;
 
-    /*MPI Init*/
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &comm_sz);
@@ -291,8 +303,7 @@ int main(int argc, char **argv){
     MPI_Type_commit(&column_datatype);
     MPI_Type_commit(&row_datatype);
 
-    dest_processes* p = (dest_processes*)malloc(sizeof(dest_processes));
-    if(p == NULL) perror_exit("Sorry, cannot allocate enough memory");
+    dest_processes p;
     compute_neighbors(my_rank,comm_sz,_div,&p);
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -300,10 +311,19 @@ int main(int argc, char **argv){
     /*The actual loop*/
     /*Convoluting image a number of times*/
     double global_timer = 0.0, local_timer = MPI_Wtime();
+    convolution_data_t cd = {
+        row_datatype,
+        column_datatype,
+        rows_per_proc,
+        cols_per_proc,
+        bytes,
+        p,
+        t0,
+        t1
+    };
     for(int i=0; i<loops; i++){
-
         int local_flag, global_sum;
-        local_flag = convolution(row_datatype,column_datatype,rows_per_proc,cols_per_proc,bytes,&p,t0,&t1);
+        local_flag = convolution(cd);
 
         /*Checking for similarity between src and dest image*/
         if (CHECK_SIMILARITY){
@@ -331,7 +351,6 @@ int main(int argc, char **argv){
 
     free(t0);
     free(t1);
-    free(p);
 
     MPI_Type_free(&row_datatype);
     MPI_Type_free(&column_datatype);
